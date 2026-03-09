@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
 import { AuthModal } from "@/components/AuthModal";
@@ -17,11 +17,19 @@ export default function GeneratePage() {
   const [productDescription, setProductDescription] = useState("");
   const [userPrompt, setUserPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState("9:16");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    const urls = files.map((f) => URL.createObjectURL(f));
+    setPreviewUrls(urls);
+    return () => urls.forEach(URL.revokeObjectURL);
+  }, [files]);
   const [promptLengthAtFetch, setPromptLengthAtFetch] = useState<number | null>(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loadingMode, setLoadingMode] = useState<"image" | "video" | null>(null);
 
   const fetchSuggestions = useCallback(
     async (partial: string) => {
@@ -49,15 +57,8 @@ export default function GeneratePage() {
     [productName, productDescription]
   );
 
-  // Show first 10, then next 10 for every 10 chars typed after fetch
-  const visibleCount =
-    promptLengthAtFetch !== null && userPrompt.length >= promptLengthAtFetch
-      ? Math.min(
-          suggestions.length,
-          Math.max(10, 10 + 10 * Math.floor((userPrompt.length - promptLengthAtFetch) / 10))
-        )
-      : suggestions.length;
-  const visibleSuggestions = suggestions.slice(0, visibleCount);
+  // Always show only 10 suggestions
+  const visibleSuggestions = suggestions.slice(0, 10);
 
   const handlePromptChange = (value: string) => {
     setUserPrompt(value);
@@ -66,7 +67,10 @@ export default function GeneratePage() {
       setPromptLengthAtFetch(null);
       return;
     }
-    if (suggestions.length === 0) fetchSuggestions(value);
+    const shouldFetch =
+      suggestions.length === 0 ||
+      (promptLengthAtFetch !== null && value.length >= promptLengthAtFetch + 10);
+    if (shouldFetch) fetchSuggestions(value);
   };
 
   const insertSuggestion = (s: string) => {
@@ -74,16 +78,28 @@ export default function GeneratePage() {
     setSuggestions([]);
   };
 
+  const removeImage = (index: number) => {
+    setFiles((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0 && fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return next;
+    });
+  };
+
   const createProject = async (mode: "image" | "video") => {
     if (!user) {
       toast.error("Please sign in to create an ad");
       return;
     }
-    if (!file) {
-      toast.error("Please upload a product image");
+    if (files.length === 0) {
+      toast.error("Please upload at least one product image");
       return;
     }
-    setLoading(true);
+    setSuggestions([]);
+    setPromptLengthAtFetch(null);
+    setLoadingMode(mode);
     try {
       const formData = new FormData();
       formData.set("name", name);
@@ -91,7 +107,8 @@ export default function GeneratePage() {
       formData.set("productDescription", productDescription);
       formData.set("userPrompt", userPrompt);
       formData.set("aspectRatio", aspectRatio);
-      formData.set("images", file);
+      files.forEach((f) => formData.append("images", f));
+      if (mode === "video") formData.set("mode", "video");
       const { data } = await api.post<{ projectId: string }>(
         "/api/project/create",
         formData,
@@ -108,7 +125,7 @@ export default function GeneratePage() {
           ?.error ?? "Creation failed";
       toast.error(msg);
     } finally {
-      setLoading(false);
+      setLoadingMode(null);
     }
   };
 
@@ -159,13 +176,57 @@ export default function GeneratePage() {
               <label className="mb-1 block text-sm font-medium text-zinc-400">
                 Product image (required)
               </label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                required
-                className="w-full rounded-lg border border-white/10 bg-[var(--card)] px-3 py-2.5 text-base text-white file:mr-2 file:rounded file:border-0 file:bg-[var(--accent)] file:min-h-[44px] file:px-4 file:py-2 file:text-white"
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  id="product-images"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => {
+                    const newFiles = Array.from(e.target.files ?? []);
+                    setFiles((prev) => [...prev, ...newFiles]);
+                    e.target.value = "";
+                  }}
+                  required={files.length === 0}
+                  className="sr-only"
+                />
+                <label
+                  htmlFor="product-images"
+                  className="inline-flex min-h-[44px] cursor-pointer items-center justify-center rounded border-0 bg-[var(--accent)] px-4 py-2.5 text-base text-white hover:bg-[var(--accent-hover)]"
+                >
+                  Choose Files
+                </label>
+                {files.length > 0 && (
+                  <span className="text-sm text-zinc-500">
+                    {files.length} image{files.length !== 1 ? "s" : ""} selected
+                  </span>
+                )}
+              </div>
+              {previewUrls.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {previewUrls.map((url, i) => (
+                    <div
+                      key={url}
+                      className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-[var(--card)]"
+                    >
+                      <img
+                        src={url}
+                        alt={`Preview ${i + 1}`}
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeImage(i)}
+                        aria-label="Remove image"
+                        className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-lg leading-none text-white hover:bg-red-500/90 focus:outline-none focus:ring-2 focus:ring-white"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-zinc-400">
@@ -237,31 +298,28 @@ export default function GeneratePage() {
                       {s}
                     </button>
                   ))}
-                  {visibleSuggestions.length < suggestions.length && (
-                    <span className="text-xs text-zinc-500">
-                      Type 10 more characters for next 10 suggestions
-                    </span>
-                  )}
-                  <span className="text-xs text-zinc-500">Tab to insert first</span>
+                  <span className="text-xs text-zinc-500">
+                    Type 10 more characters for another 10 suggestions · Tab to insert first
+                  </span>
                 </div>
               )}
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
-                disabled={loading || !user}
+                disabled={loadingMode !== null || !user}
                 onClick={() => void createProject("image")}
                 className="min-h-[48px] flex-1 rounded-xl bg-[var(--accent)] py-3 font-semibold text-white hover:bg-[var(--accent-hover)] disabled:opacity-50"
               >
-                {loading ? "Creating image… (5 credits)" : "Create Image"}
+                {loadingMode === "image" ? "Creating image… (5 credits)" : "Create Image"}
               </button>
               <button
                 type="button"
-                disabled={loading || !user}
+                disabled={loadingMode !== null || !user}
                 onClick={() => void createProject("video")}
                 className="min-h-[48px] flex-1 rounded-xl border border-[var(--accent)] py-3 font-semibold text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-50"
               >
-                {loading ? "Creating & starting video…" : "Generate Video"}
+                {loadingMode === "video" ? "Creating & starting video…" : "Generate Video"}
               </button>
             </div>
           </form>

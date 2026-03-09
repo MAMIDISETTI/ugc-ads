@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Navbar } from "@/components/Navbar";
+import { EditProjectModal } from "@/components/EditProjectModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/config/axios";
 import type { Project } from "@/types";
@@ -18,7 +19,10 @@ export default function ResultPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [videoLoading, setVideoLoading] = useState(false);
+  const [imageDeleting, setImageDeleting] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [autoVideoTriggered, setAutoVideoTriggered] = useState(false);
+  const autoVideo = searchParams.get("autoVideo") === "1";
 
   useEffect(() => {
     if (!user || !projectId) {
@@ -29,7 +33,8 @@ export default function ResultPage() {
       try {
         const { data } = await api.get<Project>(`/api/user/projects/${projectId}`);
         setProject(data);
-        if (data.isGenerating && !data.generatedImage) {
+        // Only trigger image generation when not in video-only flow (autoVideo=1 means video directly)
+        if (data.isGenerating && !data.generatedImage && !autoVideo) {
           api.post(`/api/project/${projectId}/generate`).catch(() => {});
         }
       } catch {
@@ -39,7 +44,7 @@ export default function ResultPage() {
       }
     };
     fetchProject();
-  }, [user, projectId]);
+  }, [user, projectId, autoVideo]);
 
   useEffect(() => {
     if (!projectId || (!project?.isGenerating && !project?.isVideoGenerating)) return;
@@ -55,12 +60,11 @@ export default function ResultPage() {
     return () => clearInterval(interval);
   }, [project?.isGenerating, project?.isVideoGenerating, projectId]);
 
-  const autoVideo = searchParams.get("autoVideo") === "1";
-
   useEffect(() => {
     if (!autoVideo || autoVideoTriggered) return;
     if (!project || !user) return;
-    if (!project.generatedImage || project.generatedVideo || project.isVideoGenerating) return;
+    const hasImage = project.generatedImage || project.uploadedImages?.[0];
+    if (!hasImage || project.generatedVideo || project.isVideoGenerating) return;
 
     setAutoVideoTriggered(true);
     setVideoLoading(true);
@@ -88,6 +92,39 @@ export default function ResultPage() {
         setVideoLoading(false);
       });
   }, [autoVideo, autoVideoTriggered, project, user]);
+
+  const handleDeleteImage = async () => {
+    if (!project || !user) return;
+    const isGenerated = !!project.generatedImage;
+    const isUploaded = !!project.uploadedImages?.[0];
+    if (!isGenerated && !isUploaded) return;
+    const msg = isGenerated
+      ? "Delete the generated image? The video (if any) will remain."
+      : "Delete the uploaded image?";
+    if (!confirm(msg)) return;
+    setImageDeleting(true);
+    try {
+      const url = isGenerated
+        ? `/api/project/${project._id}/image`
+        : `/api/project/${project._id}/image?type=uploaded`;
+      const { data } = await api.delete<{ project: Project }>(url);
+      const hasMedia =
+        !!data.project.generatedVideo ||
+        !!data.project.generatedImage ||
+        (data.project.uploadedImages && data.project.uploadedImages.length > 0);
+      if (!hasMedia) {
+        toast.success("Image deleted");
+        router.push("/my-generations");
+      } else {
+        setProject(data.project);
+        toast.success("Image deleted");
+      }
+    } catch {
+      toast.error("Failed to delete image");
+    } finally {
+      setImageDeleting(false);
+    }
+  };
 
   const handleGenerateVideo = async () => {
     if (!project || !user) return;
@@ -147,7 +184,7 @@ export default function ResultPage() {
     );
   }
 
-  const mediaUrl = project.generatedVideo || project.generatedImage;
+  const mediaUrl = project.generatedVideo || project.generatedImage || project.uploadedImages?.[0];
   const hasVideo = !!project.generatedVideo;
 
   return (
@@ -189,7 +226,7 @@ export default function ResultPage() {
                 />
               ) : (
                 <img
-                  src={project.generatedImage}
+                  src={project.generatedImage || project.uploadedImages?.[0]}
                   alt={project.name}
                   className="w-full object-contain"
                 />
@@ -197,7 +234,9 @@ export default function ResultPage() {
             ) : null}
           </div>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-            {project.generatedImage && !project.generatedVideo && (
+            {!project.isGenerating &&
+              (project.generatedImage || project.uploadedImages?.[0]) &&
+              !project.generatedVideo && (
               <button
                 type="button"
                 onClick={handleGenerateVideo}
@@ -209,15 +248,36 @@ export default function ResultPage() {
                   : "Generate video (10 credits)"}
               </button>
             )}
-            {project.generatedImage && (
-              <a
-                href={project.generatedImage}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex min-h-[48px] items-center justify-center rounded-xl border border-white/20 px-4 py-3 font-semibold text-white hover:bg-white/10 sm:py-2"
-              >
-                Download image
-              </a>
+            {!project.isGenerating &&
+              (project.generatedImage || project.uploadedImages?.[0]) &&
+              !project.generatedVideo && (
+              <>
+                {project.uploadedImages?.length ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditOpen(true)}
+                    className="flex min-h-[48px] items-center justify-center rounded-xl border border-white/20 px-4 py-3 font-semibold text-white hover:bg-white/10 sm:py-2"
+                  >
+                    Edit
+                  </button>
+                ) : null}
+                <a
+                  href={project.generatedImage || project.uploadedImages?.[0]}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex min-h-[48px] items-center justify-center rounded-xl border border-white/20 px-4 py-3 font-semibold text-white hover:bg-white/10 sm:py-2"
+                >
+                  Download image
+                </a>
+                <button
+                  type="button"
+                  onClick={handleDeleteImage}
+                  disabled={imageDeleting}
+                  className="flex min-h-[48px] items-center justify-center rounded-xl border border-red-500/30 px-4 py-3 font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-50 sm:py-2"
+                >
+                  {imageDeleting ? "Deleting…" : "Delete image"}
+                </button>
+              </>
             )}
             {project.generatedVideo && (
               <a
@@ -232,6 +292,16 @@ export default function ResultPage() {
           </div>
         </div>
       </main>
+      {editOpen && project && (
+        <EditProjectModal
+          project={project}
+          onClose={() => setEditOpen(false)}
+          onSuccess={(updated) => {
+            setProject(updated);
+            setEditOpen(false);
+          }}
+        />
+      )}
     </>
   );
 }

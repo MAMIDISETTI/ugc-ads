@@ -27,9 +27,10 @@ export async function POST(req: NextRequest) {
       userId: auth.userId,
     });
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    if (!project.generatedImage) {
+    const imageUrl = project.generatedImage || project.uploadedImages?.[0];
+    if (!imageUrl) {
       return NextResponse.json(
-        { error: "Generate an image first" },
+        { error: "No image available for video generation" },
         { status: 400 }
       );
     }
@@ -69,9 +70,9 @@ export async function POST(req: NextRequest) {
     let videoUrl = "";
     try {
       const videoBuffer = await generateVideoFromImage(
-        project.generatedImage,
+        imageUrl,
         project.productName,
-        project.userPrompt
+        project.userPrompt ?? ""
       );
       videoUrl = await uploadVideo(videoBuffer, "adsgen/videos");
     } catch (err) {

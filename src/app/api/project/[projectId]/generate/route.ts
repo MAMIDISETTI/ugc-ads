@@ -32,6 +32,21 @@ export async function POST(
         project: toProjectJson(project),
       });
     }
+
+    const regenerate = req.nextUrl.searchParams.get("regenerate") === "1";
+    if (regenerate) {
+      const user = await User.findById(auth.userId);
+      if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+      if (user.credits < CREDITS_IMAGE) {
+        return NextResponse.json(
+          { error: "Insufficient credits. Need 5 for image regeneration." },
+          { status: 400 }
+        );
+      }
+      user.credits -= CREDITS_IMAGE;
+      await user.save();
+    }
+
     const now = Date.now();
     const startedAt = project.generationStartedAt
       ? new Date(project.generationStartedAt).getTime()

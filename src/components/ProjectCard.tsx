@@ -5,24 +5,27 @@ import { useState } from "react";
 import type { Project } from "@/types";
 import { api } from "@/config/axios";
 import toast from "react-hot-toast";
+import { EditProjectModal } from "./EditProjectModal";
 
 interface ProjectCardProps {
   project: Project;
   onDelete?: (id: string) => void;
-  showPublish?: boolean;
-  onPublishToggle?: (id: string) => void;
+  onProjectUpdate?: (project: Project) => void;
 }
 
 export function ProjectCard({
   project,
   onDelete,
-  showPublish = false,
-  onPublishToggle,
+  onProjectUpdate,
 }: ProjectCardProps) {
   const [deleting, setDeleting] = useState(false);
+  const [deletingImage, setDeletingImage] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const mediaUrl = project.generatedVideo || project.generatedImage || project.uploadedImages?.[0];
+  const [editOpen, setEditOpen] = useState(false);
   const hasVideo = !!project.generatedVideo;
+  const mediaUrl =
+    project.generatedVideo ||
+    (project.isGenerating ? null : project.generatedImage || project.uploadedImages?.[0]);
 
   const handleDelete = async () => {
     if (!confirm("Delete this project?")) return;
@@ -35,6 +38,28 @@ export function ProjectCard({
       toast.error("Failed to delete");
     } finally {
       setDeleting(false);
+      setMenuOpen(false);
+    }
+  };
+
+  const handleDeleteImage = async () => {
+    const isGenerated = !!project.generatedImage;
+    const isUploaded = !!project.uploadedImages?.[0];
+    if (!isGenerated && !isUploaded) return;
+    const msg = isGenerated ? "Delete the generated image?" : "Delete the uploaded image?";
+    if (!confirm(msg)) return;
+    setDeletingImage(true);
+    try {
+      const url = isGenerated
+        ? `/api/project/${project._id}/image`
+        : `/api/project/${project._id}/image?type=uploaded`;
+      const { data } = await api.delete<{ project: Project }>(url);
+      onProjectUpdate?.(data.project);
+      toast.success("Image deleted");
+    } catch {
+      toast.error("Failed to delete image");
+    } finally {
+      setDeletingImage(false);
       setMenuOpen(false);
     }
   };
@@ -110,7 +135,7 @@ export function ProjectCard({
         )}
       </Link>
 
-      {hasVideo && (
+      {(hasVideo || project.generatedImage || project.uploadedImages?.[0]) && (
         <div className="absolute right-2 top-2 z-10">
           <button
             type="button"
@@ -122,20 +147,32 @@ export function ProjectCard({
           </button>
           {menuOpen && (
             <div className="mt-2 w-40 rounded-lg border border-white/10 bg-[var(--card)] p-1 text-sm text-zinc-200 shadow-lg">
-              <button
-                type="button"
-                onClick={handleDownloadVideo}
-                className="flex w-full items-center justify-start rounded-md px-3 py-2 text-left hover:bg-white/10"
-              >
-                Download Video
-              </button>
+              {hasVideo && (
+                <button
+                  type="button"
+                  onClick={handleDownloadVideo}
+                  className="flex w-full items-center justify-start rounded-md px-3 py-2 text-left hover:bg-white/10"
+                >
+                  Download Video
+                </button>
+              )}
+              {(project.generatedImage || project.uploadedImages?.[0]) && (
+                <button
+                  type="button"
+                  onClick={handleDeleteImage}
+                  disabled={deletingImage}
+                  className="flex w-full items-center justify-start rounded-md px-3 py-2 text-left text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  {deletingImage ? "Deleting…" : "Delete Image"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleDelete}
                 disabled={deleting}
                 className="mt-1 flex w-full items-center justify-start rounded-md px-3 py-2 text-left text-red-400 hover:bg-red-500/20 disabled:opacity-50"
               >
-                Delete Video
+                {deleting ? "Deleting…" : "Delete Project"}
               </button>
             </div>
           )}
@@ -152,6 +189,18 @@ export function ProjectCard({
           >
             View Details
           </Link>
+          {project.uploadedImages?.length ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEditOpen(true);
+                setMenuOpen(false);
+              }}
+              className="min-h-[36px] rounded-lg bg-white/10 px-3 py-2 text-sm font-medium text-white hover:bg-white/20"
+            >
+              Edit
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => handleShare("youtube")}
@@ -173,17 +222,18 @@ export function ProjectCard({
           >
             Copy link
           </button>
-          {showPublish && onPublishToggle && !hasVideo && (
-            <button
-              type="button"
-              onClick={() => onPublishToggle(project._id)}
-              className="min-h-[36px] rounded-lg bg-[var(--accent)]/20 px-3 py-2 text-sm font-medium text-[var(--accent)] hover:bg-[var(--accent)]/30"
-            >
-              {project.isPublished ? "Unpublish" : "Publish"}
-            </button>
-          )}
         </div>
       </div>
+      {editOpen && (
+        <EditProjectModal
+          project={project}
+          onClose={() => setEditOpen(false)}
+          onSuccess={(updated) => {
+            onProjectUpdate?.(updated);
+            setEditOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

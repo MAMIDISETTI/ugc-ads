@@ -16,12 +16,21 @@ export async function generateImagePrompt(
   userPromptPartial: string
 ): Promise<string[]> {
   if (!ai) return [];
-  const prompt = `You are an ad copy expert. Given:
-- Product name: ${productName}
-- Product description: ${productDescription}
-- User's partial prompt: "${userPromptPartial}"
+  const prompt = `You are an ad copy expert.
 
-Return exactly 30 short prompt suggestions (1 line each) to complete the ad creative idea. Return only the 30 lines, one per line, no numbering or bullets.`;
+Product Name: ${productName}
+Product Description: ${productDescription}
+
+User's Partial Prompt: "${userPromptPartial}"
+
+Based on the user's partial prompt, generate exactly 10 short ad creative prompt suggestions that logically complete the idea.
+
+Rules:
+- Each suggestion must be one short line.
+- Suggestions must be relevant to the product and the user's partial prompt.
+- Do not add numbering, bullets, or extra text.
+- Return exactly 10 lines only.
+`;
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: prompt,
@@ -31,7 +40,7 @@ Return exactly 30 short prompt suggestions (1 line each) to complete the ad crea
     .split("\n")
     .map((s) => s.replace(/^[\d.)\-\*]\s*/, "").trim())
     .filter(Boolean)
-    .slice(0, 30);
+    .slice(0, 10);
 }
 
 export async function generateAdImage(

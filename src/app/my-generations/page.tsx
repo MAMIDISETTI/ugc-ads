@@ -33,8 +33,37 @@ export default function MyGenerationsPage() {
     fetchProjects();
   }, [user, authLoading, router]);
 
+  // Poll for projects that are generating
+  useEffect(() => {
+    const generating = projects.filter((p) => p.isGenerating || p.isVideoGenerating);
+    if (generating.length === 0) return;
+    const interval = setInterval(async () => {
+      try {
+        const { data } = await api.get<Project[]>("/api/user/projects");
+        setProjects(Array.isArray(data) ? data : []);
+      } catch {
+        // ignore
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [projects]);
+
   const handleDelete = (id: string) => {
     setProjects((prev) => prev.filter((p) => p._id !== id));
+  };
+
+  const handleProjectUpdate = (updated: Project) => {
+    const hasMedia =
+      !!updated.generatedVideo ||
+      !!updated.generatedImage ||
+      (updated.uploadedImages && updated.uploadedImages.length > 0);
+    if (!hasMedia) {
+      setProjects((prev) => prev.filter((p) => p._id !== updated._id));
+    } else {
+      setProjects((prev) =>
+        prev.map((p) => (p._id === updated._id ? updated : p))
+      );
+    }
   };
 
   if (authLoading) {
@@ -75,21 +104,7 @@ export default function MyGenerationsPage() {
                   key={project._id}
                   project={project}
                   onDelete={handleDelete}
-                  showPublish
-                  onPublishToggle={async (id) => {
-                    try {
-                      await api.get(`/api/user/publish/${id}`);
-                      setProjects((prev) =>
-                        prev.map((p) =>
-                          p._id === id
-                            ? { ...p, isPublished: !p.isPublished }
-                            : p
-                        )
-                      );
-                    } catch {
-                      // ignore
-                    }
-                  }}
+                  onProjectUpdate={handleProjectUpdate}
                 />
               ))}
             </div>
